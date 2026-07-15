@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import sqlite3
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager, contextmanager
@@ -13,11 +15,30 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 DB_PATH = "webhooks.db"
+DELIVERY_WORKER_STOP = threading.Event()
+DELIVERY_WORKER = None
+WORKER_ENABLED = os.environ.get("WEBHOOK_WORKER_ENABLED", "1") != "0"
+
+
+def run_delivery_loop() -> None:
+    while not DELIVERY_WORKER_STOP.wait(1.0):
+        process_due_deliveries()
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    yield
+    global DELIVERY_WORKER
+    DELIVERY_WORKER_STOP.clear()
+    if WORKER_ENABLED:
+        DELIVERY_WORKER = threading.Thread(target=run_delivery_loop, daemon=True)
+        DELIVERY_WORKER.start()
+    try:
+        yield
+    finally:
+        DELIVERY_WORKER_STOP.set()
+        if DELIVERY_WORKER is not None:
+            DELIVERY_WORKER.join(timeout=2.0)
 
 
 app = FastAPI(title="Webhook Delivery Service", lifespan=lifespan)
@@ -264,6 +285,11 @@ def get_event_status(event_id: str) -> EventStatusOut:
         last_error=row["last_error"],
         endpoint_url=row["endpoint_url"],
     )
+
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {"service": "webhook-delivery-service", "status": "ok"}
 
 
 @app.get("/health")
