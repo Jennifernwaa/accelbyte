@@ -1,5 +1,6 @@
 # Webhook Delivery Service Decisions
 
+
 This service uses a pragmatic at-least-once delivery model. Webhooks are  asynchronous and delivered to third-party endpoints outside our control, so we guarantee that an event is persisted and retried until it is either delivered or reaches a terminal failure state. We do not claim exactly-once semantics; instead, we rely on a durable event ID and receiver-side idempotency to make duplicates safe when the endpoint is retried after a transient outage.
 
 Retry behavior is exponential backoff with jitter, capped at a bounded retry budget. A delivery is considered terminal when the endpoint returns a permanent client error (for example 4xx such as 400, 404, or 410) or when the retry budget is exhausted. We keep the event record for inspection and replay rather than dropping it silently.
